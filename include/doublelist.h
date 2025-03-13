@@ -1,122 +1,150 @@
 #pragma once
 #include <utility>
 #include <stdexcept>
-struct Base_DNode
+template <typename T>
+class Base_DNode
 {
-	Base_DNode* next;
-	Base_DNode* prev;
+protected:
+	Base_DNode<T>* next;
+	Base_DNode<T>* prev;
+public:
 	Base_DNode() : next(this), prev(this) {};
-	Base_DNode(Base_DNode* _prev, Base_DNode* _next) : next(_next), prev(_prev)
-	{
-		next->prev = prev->next = this;
-	}
-	~Base_DNode()
-	{
-		next->prev = prev;
-		prev->next = next;
-	}
+	virtual T const& GetVal() const = 0;
+	virtual T& GetVal() = 0;
 };
 
 template <typename T>
-struct T_DNode : public Base_DNode
+class T_DNode : public Base_DNode<T>
 {
+protected:
 	T val;
-	T_DNode() : Base_DNode(), val() {};
-	T_DNode(Base_DNode* _prev, Base_DNode* _next, T const& _val) : Base_DNode(_prev, _next), val(_val) {};
+public:
+	T_DNode() : Base_DNode<T>(), val() {};
+	T_DNode(T const& _val) : Base_DNode<T>(), val(_val) {};
+	T const& GetVal() const noexcept override { return val; }
+	T& GetVal() noexcept override { return val; }
 };
 
 template <typename T>
 class T_DList
 {
 private:
-	Base_DNode* Head;
+	Base_DNode<T>* Head;
 	mutable T_DNode<T>* pCur;
 	size_t size;
 public:
 	T_DList()
 	{
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		size = 0;
+		GoHead();
 	}
 	T_DList(T const& _val)
 	{
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		push_back(_val);
 		size = 1;
+		GoHead();
 	}
 	T_DList(T const* arr, size_t sz)
 	{
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		size = 0;
 		for (size_t i = 0; i < sz; i++)
 			push_back(arr[i]);
+		GoHead();
 	}
 	T_DList(T_DList<T> const& _Lst)
 	{
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		size = 0;
 		for (pCur = _Lst.Head->next; pCur != _Lst.Head; pCur = pCur->next)
-			push_back(pCur->val);
-		pCur = Head->next;
+			push_back(pCur->GetVal());
+		GoHead();
 	}
 	T_DList(T_DList<T>&& _Lst)
 	{
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		swap(*this, _Lst);
+		GoHead();
+	}
+	T_DList& operator = (T_DList<T> const& _Lst)
+	{
+		clear();
+		for (pCur = _Lst.Head->next; pCur != _Lst.Head; pCur = pCur->next)
+			push_back(pCur->GetVal());
+		GoHead();
+		return this*;
+	}
+	T_DList& operator = (T_DList<T>&& _Lst)
+	{
+		swap(*this, _Lst);
+		GoHead();
+		return *this;
 	}
 	T_DList(T_DList<T> const& _Lst, size_t count)	// Copy first count nodes, but not more than size of _Lst
 	{
 		if (count > _Lst.size)
 			count = _Lst.size;
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		size = 0;
 		pCur = _Lst.Head->next;
 		for (size_t i = 0; i < count; i++)
 		{
-			push_back(pCur->val);
+			push_back(pCur->GetVal());
 			GoNext();
 		}
-		pCur = Head->next;
+		GoHead();
 	}
 	T_DList(size_t count, T_DList<T> const& _Lst)	// Copy last count nodes, but not more than size of _Lst
 	{
 		if (count > _Lst.size)
 			count = _Lst.size;
-		Head = new Base_DNode;
+		Head = new Base_DNode<T>;
 		size = 0;
 		pCur = _Lst.Head->prev;
 		for (size_t i = 0; i < count; i++)
 		{
-			push_front(pCur->val);
+			push_front(pCur->GetVal());
 			GoPrev();
 		}
-		pCur = Head->next;
+		GoHead();
 	}
 	T_DList(T_DList<T> const& _Lst, size_t pos, size_t count)	// Copy count nodes starting from pos
 	{
 		if (pos + count > size)
 			throw std::overflow_error("Out of range");
-		Head = new Base_DNode;
+		size_t i = 0;
+		Head = new Base_DNode<T>;
 		size = 0;
-		T_DNode* tmp = _Lst.pCur;
-		_Lst.GoTo(pos);
-		for (size_t i = 0; i < count; i++)
+		pCur = _Lst.Head->next;
+		for (; i < pos; i++)
+			GoNext();
+		for (i = 0; i < count; i++)
 		{
-			push_back(pCur->val);
-			_Lst.GoNext();
+			push_back(pCur->GetVal());
+			GoNext();
 		}
-		_Lst.pCur = tmp;
+		GoFirst();
 	}
 
 	~T_DList()
 	{
+		T_DNode<T>* tmp;
 		while (Head->next != Head)
-			delete Head->next;
+		{
+			tmp = Head->next;
+			Unbind(tmp);
+			delete tmp;
+		}
+		delete Head;
 	}
 
 	friend void swap(T_DList<T>& lhs, T_DList<T>& rhs)
 	{
 		std::swap(lhs.Head, rhs.Head);
+		std::swap(lhs.size, rhs.size);
+		std::swap(lhs.pCur, rhs.pCur);
 		return;
 	}
 
@@ -125,36 +153,56 @@ public:
 		return size;
 	}
 
+	static void Bind(T_DNode<T>* node, T_DNode<T>* _prev, T_DNode<T>* _next)
+	{
+		node->next = _next;
+		node->prev = _prev;
+		_next->prev = _prev->next = this;
+		return;
+	}
+	static void Unbind(T_DNode<T>* node)
+	{
+		node->next->prev = node->prev;
+		node->prev->next = node->next;
+		node->next = node->prev = this;
+		return;
+	}
+
 	// Adding Nodes
 	void push_back(T const& _val)
 	{
-		new T_DNode<T>(Head->prev, Head, _val);
+		Bind(new T_DNode<T>(_val), Head->prev, Head);
 		size++;
 		return;
 	}
 	void push_front(T const& _val)
 	{
-		new T_DNode<T>(Head, Head->next, _val);
+		Bind(new T_DNode<T>(_val), Head, Head->next);
 		size++;
 		return;
 	}
 	void insert(T const& _val, size_t pos) noexcept
 	{
 		GoTo(pos);
-		new T_DNode<T>(pCur, pCur->next, _val);
+		Bind(new T_DNode<T>(_val), pCur->prev, pCur);
 		size++;
+		return;
 	}
 	void insert_at(T const& _val, size_t pos)
 	{
-		GoTo(pos);
-		new T_DNode<T>(pCur, pCur->next, _val);
+		GoAt(pos);
+		Bind(new T_DNode<T>(_val), pCur->prev, pCur);
 		size++;
+		return;
 	}
 
 	// Deleting Nodes
-	void pop_back()
+	void pop_back() noexcept
 	{
-		delete Head->prev;
+		T_DNode<T>* tmp = Head->prev;
+		Unbind(tmp);
+		delete tmp;
+		GoFirst();
 		size--;
 		return;
 	}
@@ -162,15 +210,21 @@ public:
 	{
 		if (Head->prev != Head)
 		{
-			delete Head->prev;
+			T_DNode<T>* tmp = Head->prev;
+			Unbind(tmp);
+			delete tmp;
+			GoFirst();
 			size--;
 		}
 		else throw std::logic_error("Can't delete Head");
 		return;
 	}
-	void pop_front()
+	void pop_front() noexcept
 	{
-		delete Head->next;
+		T_DNode<T>* tmp = Head->next;
+		Unbind(tmp);
+		delete tmp;
+		GoFirst();
 		size--;
 		return;
 	}
@@ -178,39 +232,50 @@ public:
 	{
 		if (Head->next != Head)
 		{
-			delete Head->next;
+			T_DNode<T>* tmp = Head->next;
+			Unbind(tmp);
+			delete tmp;
+			GoFirst();
 			size--;
 		}
 		else throw std::logic_error("Can't delete Head");
 		return;
 	}
-	void exclud_next()
+	void exclude_next() noexcept
 	{
-		delete pCur->next;
+		T_DNode<T>* tmp = pCur->next;
+		Unbind(tmp);
+		delete tmp;
 		size--;
 		return;
 	}
 	void exclude_nexts()
 	{
-		if (pCur != Head)
+		if (pCur->next != Head)
 		{
-			delete pCur->next;
+			T_DNode<T>* tmp = pCur->next;
+			Unbind(tmp);
+			delete tmp;
 			size--;
 		}
 		else throw std::logic_error("Can't delete Head");
 		return;
 	}
-	void exclud_prev()
+	void exclude_prev() noexcept
 	{
-		delete pCur->prev;
+		T_DNode<T>* tmp = pCur->prev;
+		Unbind(tmp);
+		delete tmp;
 		size--;
 		return;
 	}
 	void exclude_prevs()
 	{
-		if (pCur != Head)
+		if (pCur->prev != Head)
 		{
-			delete pCur->prev;
+			T_DNode<T>* tmp = pCur->prev;
+			Unbind(tmp);
+			delete tmp;
 			size--;
 		}
 		else throw std::logic_error("Can't delete Head");
@@ -219,7 +284,9 @@ public:
 	void exclude(size_t pos)
 	{
 		GoTo(pos);
-		delete pCur;
+		T_DNode<T>* tmp = pCur;
+		Unbind(tmp);
+		delete tmp;
 		size--;
 		GoFirst();
 		return;
@@ -227,60 +294,75 @@ public:
 	void exclude_at(size_t pos)
 	{
 		GoAt(pos);
-		delete pCur;
+		T_DNode<T>* tmp = pCur;
+		Unbind(tmp);
+		delete tmp;
 		size--;
 		GoFirst();
 		return;
 	}
 	void clear()
 	{
+		T_DNode<T>* tmp;
 		while (Head->next != Head)
 		{
-			delete Head->next;
-			size--;
+			tmp = Head->next;
+			Unbind(tmp);
+			delete tmp;
 		}
+		size = 0;
+		GoHead();
 		return;
 	}
 
 	//Navigation
-	void GoHead() const noexcept
+	inline void GoHead() const noexcept
 	{
 		pCur = Head;
 		return;
 	}
-	void GoFirst() const noexcept
+	inline void GoFirst() const noexcept
 	{
 		pCur = Head->next;
 		return;
 	}
-	void GoLast() const noexcept
+	inline void GoLast() const noexcept
 	{
 		pCur = Head->prev;
 		return;
 	}
-	void GoNext() const noexcept
+	inline void GoNext() const noexcept
 	{
 		pCur = pCur->next;
 		return;
 	}
-	void GoPrev() const noexcept
+	inline void GoPrev() const noexcept
 	{
 		pCur = pCur->prev;
 		return;
 	}
+	void GoShift(long long int a)
+	{
+		if (a >= 0)
+			for (size_t i = 0; i < a; i++)
+				GoNext();
+		else
+			for (size_t i = 0; i < -a; i++)
+				GoPrev();
+		return;
+	}
 	void GoTo(size_t pos) const noexcept
 	{
-		if (pos <= size - pos)
+		if (pos < size / 2)
 		{
-			GoHead();
-			for (size_t i = 0; i < pos; i++)
+			GoFirst();
+			for (size_t i=0;i < pos;i++)
 				GoNext();
 		}
 		else
 		{
 			GoLast();
-			pos = size - pos;
-			for (size_t i = 0; i < pos; i++)
+			for (size_t i = size-1; i > pos; i--)
 				GoPrev();
 		}
 		return;
@@ -289,42 +371,30 @@ public:
 	{
 		if (pos >= size)
 			throw std::overflow_error("Out of range");
-		if (pos <= size - pos)
-		{
-			GoHead();
-			for (size_t i = 0; i < pos; i++)
-				GoNext();
-		}
-		else
-		{
-			GoLast();
-			pos = size - pos;
-			for (size_t i = 0; i < pos; i++)
-				GoPrev();
-		}
+		GoTo(pos);
 		return;
 	}
 
 	// Access to values
 	T& GetCurVal() noexcept
 	{
-		return pCur->val;
+		return pCur->GetVal();
 	}
 	T const& GetCurVal() const noexcept
 	{
-		return pCur->val;
+		return pCur->GetVal();
 	}
 	T& AtCurVal()
 	{
 		if (pCur == Head)
 			throw std::underflow_error("Can't access value of List Head");
-		return pCur->val;
+		return pCur->GetVal();
 	}
 	T const& AtCurVal() const
 	{
 		if (pCur == Head)
 			throw std::underflow_error("Can't access value of List Head");
-		return pCur->val;
+		return pCur->GetVal();
 	}
 
 	// Indexed access
@@ -349,11 +419,128 @@ public:
 		return  GetCurVal();
 	}
 
-	static T_DList sorted_mrege(T_DList& const lhs, T_DList const& rhs)
+	void GetSorted()
+	{
+		if (size > 1)
+		{
+			T_DNode<T>* lhs, * rhs, * tmp;
+			size_t width = 1, i, j, lk, rk, pos = 0;
+			while (width < size)
+			{
+				GoFirst();
+				for (; pos + 2 * width <= size;)
+				{
+					lhs = pCur;
+					GoShift(width);
+					pos += width;
+					rhs = pCur;
+					lk = rk = 0;
+					GoShift(width);
+					pos += width;
+					while (lk < width && rk < width)
+					{
+						if (lhs->val > rhs->val)
+						{
+							tmp = rhs->next;
+							Unbind(rhs);
+							Bind(rhs, lhs->prev, lhs);
+							rhs = tmp;
+							rk++;
+						}
+						else
+						{
+							lhs = lhs->next;
+							lk++;
+						}
+					}
+				}
+				if (size - pos > width)
+				{
+					size_t tail = size - pos - width;
+					lhs = pCur;
+					GoShift(width);
+					rhs = pCur;
+					lk = rk = 0;
+					while (rk < tail && lk < width)
+					{
+						if (lhs->val > rhs->val)
+						{
+							tmp = rhs->next;
+							Unbind(rhs);
+							Insert(rhs, lhs->prev, lhs);
+							rhs = tmp;
+							rk++;
+						}
+						else
+						{
+							lhs = lhs->next;
+							lk++;
+						}
+					}
+				}
+				width *= 2;
+			}
+			/*
+			Vec<T_DNode<T>*> Node;
+			for (GoFirst(); Node.GetSize() >= size; pCur = pCur->next->next)
+				Node.push_back(pCur);
+			for (; width <= size; width *= 2)
+			{
+				for (i = 0; i + 2 * width <= size; i += 2 * width)
+				{
+					lhs = Node[i];
+					rhs = Node[i + width];
+					lk = rk = 0;
+					while(lk < width && rk < width)
+					{
+						if (lhs->val > rhs->val)
+						{
+							tmp = rhs->next;
+							rhs->Unbind();
+							rhs->Insert(lhs->prev, lhs);
+							rhs = tmp;
+							rk++;
+						}
+						else 
+						{
+							lhs = lhs->next;
+							lk++;
+						}
+					}
+				}
+				if (size - i > width)
+				{
+					size_t tail = size - i - width;
+					lhs = Node[i];
+					rhs = Node[i + width];
+					lk = rk = 0;
+					while (rk < tail && lk < width)
+					{
+						if (lhs->val > rhs->val)
+						{
+							tmp = rhs->next;
+							rhs->Unbind();
+							rhs->Insert(lhs->prev, lhs);
+							rhs = tmp;
+							rk++;
+						}
+						else
+						{
+							lhs = lhs->next;
+							lk++;
+						}
+					}
+				}
+			}*/
+		}
+		return;
+	}
+
+	static T_DList<T>& sorted_merge(T_DList<T>& const lhs, T_DList<T> const& rhs)
 	{
 		T_DList Res;
 		T_DNode<T> P1 = lhs.Head->next, P2 = rhs.Head->next;
-		Base_DNode const H1 = lhs.Head, H2 = rhs.Head;
+		Base_DNode<T> const H1 = lhs.Head, H2 = rhs.Head;
 		while (P1 != H1 && P2 != H2)
 		{
 			if (P1->val <= P2->val)
@@ -380,13 +567,13 @@ public:
 		return Res;
 	}
 
-	static T_DList sorted_merge(T_DList&& lhs, T_DList&& rhs)
+	static T_DList<T> sorted_merge(T_DList<T>&& lhs, T_DList<T>&& rhs)
 	{
 		if (lhs.size < rhs.size)
 			std::swap(lhs, rhs);
 		T_DList Res(lhs);
-		T_DNode<T> P1 = Res.Head->next, P2 = rhs.Head->next;
-		Base_DNode const H1 = Res.Head, H2 = rhs.Head;
+		T_DNode<T> P1 = Res.Head->next, P2 = rhs.Head->next, tmp;
+		Base_DNode<T> const H1 = Res.Head, H2 = rhs.Head;
 		while (P1 != H1 && P2 != H2)
 		{
 			if (P1->val <= P2->val)
@@ -395,23 +582,19 @@ public:
 			}
 			else
 			{
-				P1->prev->next = P2;
-				P2->prev = P1->prev;
-				P1->prev = P2;
-				P2 = P2->next;
-				P2->prev->next = P1;
+				tmp = P2->next;
+				Res.Insert(P2, P1->prev, P1);
+				P2 = tmp;
 			}
 
 		}
 		while (P2 != H2)
 		{
-			H1->prev->next = P2;
-			P2->prev = H1->prev;
-			H1->prev = P2;
-			P2 = P2->next;
-			P2->prev->next = H1;
+			tmp = P2->next;;
+			Res.Insert(P2, P1->prev, P1);
+			P2 = tmp;
 		}
-		rhs.Head->prev = rhs.Head->next = rhs.Head;
-		return Res;
+		H2->prev = H2->next = H2;
+		return std::move(Res);
 	}
 };
